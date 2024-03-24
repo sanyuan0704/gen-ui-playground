@@ -1,100 +1,23 @@
 import "server-only";
-
+import React from "react";
 import { createAI, createStreamableUI, getMutableAIState } from "ai/rsc";
 import OpenAI from "openai";
+import { BotCard, BotMessage } from "@/components/message";
+import { spinner } from "@/components/ui/spinner";
 
-import {
-  spinner,
-  BotCard,
-  BotMessage,
-  SystemMessage,
-  Stock,
-  Purchase,
-  Stocks,
-  Events,
-} from "@/components/llm-stocks";
-
-import {
-  runAsyncFnWithoutBlocking,
-  sleep,
-  formatNumber,
-  runOpenAICompletion,
-} from "@/lib/utils";
-import { z } from "zod";
-import { StockSkeleton } from "@/components/llm-stocks/stock-skeleton";
-import { EventsSkeleton } from "@/components/llm-stocks/events-skeleton";
-import { StocksSkeleton } from "@/components/llm-stocks/stocks-skeleton";
+function checkValid(html: string) {
+  // Invalid case:
+  // 1. ...< 结尾
+  // 2. ...</ 结尾
+  // 3. ...<! 结尾
+  // 4. ...<!-- 结尾
+  const regex = /<[^>]*$/;
+  return !regex.test(html);
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-
-async function confirmPurchase(symbol: string, price: number, amount: number) {
-  "use server";
-
-  const aiState = getMutableAIState<typeof AI>();
-
-  const purchasing = createStreamableUI(
-    <div className="inline-flex items-start gap-1 md:items-center">
-      {spinner}
-      <p className="mb-2">
-        Purchasing {amount} ${symbol}...
-      </p>
-    </div>
-  );
-
-  const systemMessage = createStreamableUI(null);
-
-  runAsyncFnWithoutBlocking(async () => {
-    // You can update the UI at any point.
-    await sleep(1000);
-
-    purchasing.update(
-      <div className="inline-flex items-start gap-1 md:items-center">
-        {spinner}
-        <p className="mb-2">
-          Purchasing {amount} ${symbol}... working on it...
-        </p>
-      </div>
-    );
-
-    await sleep(1000);
-
-    purchasing.done(
-      <div>
-        <p className="mb-2">
-          You have successfully purchased {amount} ${symbol}. Total cost:{" "}
-          {formatNumber(amount * price)}
-        </p>
-      </div>
-    );
-
-    systemMessage.done(
-      <SystemMessage>
-        You have purchased {amount} shares of {symbol} at ${price}. Total cost ={" "}
-        {formatNumber(amount * price)}.
-      </SystemMessage>
-    );
-
-    aiState.done([
-      ...aiState.get(),
-      {
-        role: "system",
-        content: `[User has purchased ${amount} shares of ${symbol} at ${price}. Total cost = ${
-          amount * price
-        }]`,
-      },
-    ]);
-  });
-
-  return {
-    purchasingUI: purchasing.value,
-    newMessage: {
-      id: Date.now(),
-      display: systemMessage.value,
-    },
-  };
-}
 
 async function submitUserMessage(content: string) {
   "use server";
@@ -112,231 +35,66 @@ async function submitUserMessage(content: string) {
     <BotMessage className="items-center">{spinner}</BotMessage>
   );
 
-  const completion = runOpenAICompletion(openai, {
-    model: "gpt-3.5-turbo",
+  const stream = await openai.chat.completions.create({
+    model: "gpt-4",
     stream: true,
     messages: [
       {
         role: "system",
-        content: `\
-You are a stock trading conversation bot and you can help users buy stocks, step by step.
-You and the user can discuss stock prices and the user can adjust the amount of stocks they want to buy, or place an order, in the UI.
+        content: `
+  You are a frontend expert and you are great at React and Tailwind CSS.
+  Faced with every message, you will recieve the data from user and then use the data and choose a appropriate layout to render the ui, finally you just give the html code. Use card design as the container of the ui as much as possible.
+  
+  The style of ui should be iOS style.
 
-Messages inside [] means that it's a UI element or a user event. For example:
-- "[Price of AAPL = 100]" means that an interface of the stock price of AAPL is shown to the user.
-- "[User has changed the amount of AAPL to 10]" means that the user has changed the amount of AAPL to 10 in the UI.
+  Don't import any package for the component. And Only use Tailwind CSS for styling.
+  Don't add any extra text or comments in the code.
 
-If the user requests purchasing a stock, call \`show_stock_purchase_ui\` to show the purchase UI.
-If the user just wants the price, call \`show_stock_price\` to show the price.
-If you want to show trending stocks, call \`list_stocks\`.
-If you want to show events, call \`get_events\`.
-If the user wants to sell stock, or complete another impossible task, respond that you are a demo and cannot do that.
+  The image should be adaptive to the width of the container and comfortable with the words, and the image url should be online.
 
-Besides that, you can also chat with users and do some calculations if needed.`,
-      },
-      ...aiState.get().map((info: any) => ({
-        role: info.role,
-        content: info.content,
-        name: info.name,
-      })),
-    ],
-    functions: [
-      {
-        name: "show_stock_price",
-        description:
-          "Get the current stock price of a given stock or currency. Use this to show the price to the user.",
-        parameters: z.object({
-          symbol: z
-            .string()
-            .describe(
-              "The name or symbol of the stock or currency. e.g. DOGE/AAPL/USD."
-            ),
-          price: z.number().describe("The price of the stock."),
-          delta: z.number().describe("The change in price of the stock"),
-        }),
+  The ui design principle is to be simple and clear, and near to Material Design. And the preference must be consistent among all the element, such as the theme color and align style.
+
+  The vertical and horizental padding and margin should be reasonable and consistent among all the element, must not be empty because it will make the element looks close to each other and hard to distinguish.
+
+  DON'T INCLUDE ANYTHING ELSE EXCEPT THE HTML CODE!
+  DON'T INCLUDE ANYTHING ELSE EXCEPT THE HTML CODE!
+  DON'T INCLUDE ANYTHING ELSE EXCEPT THE HTML CODE!
+  For example:
+  \`\`\`
+  <div class="bg-red-500 text-white p-4 rounded-lg">
+    Hello, world!
+  </div>
+  \`\`\`
+            `,
       },
       {
-        name: "show_stock_purchase_ui",
-        description:
-          "Show price and the UI to purchase a stock or currency. Use this if the user wants to purchase a stock or currency.",
-        parameters: z.object({
-          symbol: z
-            .string()
-            .describe(
-              "The name or symbol of the stock or currency. e.g. DOGE/AAPL/USD."
-            ),
-          price: z.number().describe("The price of the stock."),
-          numberOfShares: z
-            .number()
-            .describe(
-              "The **number of shares** for a stock or currency to purchase. Can be optional if the user did not specify it."
-            ),
-        }),
-      },
-      {
-        name: "list_stocks",
-        description: "List three imaginary stocks that are trending.",
-        parameters: z.object({
-          stocks: z.array(
-            z.object({
-              symbol: z.string().describe("The symbol of the stock"),
-              price: z.number().describe("The price of the stock"),
-              delta: z.number().describe("The change in price of the stock"),
-            })
-          ),
-        }),
-      },
-      {
-        name: "get_events",
-        description:
-          "List funny imaginary events between user highlighted dates that describe stock activity.",
-        parameters: z.object({
-          events: z.array(
-            z.object({
-              date: z
-                .string()
-                .describe("The date of the event, in ISO-8601 format"),
-              headline: z.string().describe("The headline of the event"),
-              description: z.string().describe("The description of the event"),
-            })
-          ),
-        }),
+        role: "user",
+        content,
       },
     ],
-    temperature: 0,
   });
 
-  completion.onTextContent((content: string, isFinal: boolean) => {
-    reply.update(<BotMessage>{content}</BotMessage>);
-    if (isFinal) {
-      reply.done();
-      aiState.done([...aiState.get(), { role: "assistant", content }]);
-    }
-  });
-
-  completion.onFunctionCall("list_stocks", async ({ stocks }) => {
-    reply.update(
-      <BotCard>
-        <StocksSkeleton />
-      </BotCard>
-    );
-
-    await sleep(1000);
-
-    reply.done(
-      <BotCard>
-        <Stocks stocks={stocks} />
-      </BotCard>
-    );
-
-    aiState.done([
-      ...aiState.get(),
-      {
-        role: "function",
-        name: "list_stocks",
-        content: JSON.stringify(stocks),
-      },
-    ]);
-  });
-
-  completion.onFunctionCall("get_events", async ({ events }) => {
-    reply.update(
-      <BotCard>
-        <EventsSkeleton />
-      </BotCard>
-    );
-
-    await sleep(1000);
-
-    reply.done(
-      <BotCard>
-        <Events events={events} />
-      </BotCard>
-    );
-
-    aiState.done([
-      ...aiState.get(),
-      {
-        role: "function",
-        name: "list_stocks",
-        content: JSON.stringify(events),
-      },
-    ]);
-  });
-
-  completion.onFunctionCall(
-    "show_stock_price",
-    async ({ symbol, price, delta }) => {
-      reply.update(
-        <BotCard>
-          <StockSkeleton />
-        </BotCard>
-      );
-
-      await sleep(1000);
-
-      reply.done(
-        <BotCard>
-          <Stock name={symbol} price={price} delta={delta} />
-        </BotCard>
-      );
-
-      aiState.done([
-        ...aiState.get(),
-        {
-          role: "function",
-          name: "show_stock_price",
-          content: `[Price of ${symbol} = ${price}]`,
-        },
-      ]);
-    }
-  );
-
-  completion.onFunctionCall(
-    "show_stock_purchase_ui",
-    ({ symbol, price, numberOfShares = 100 }) => {
-      if (numberOfShares <= 0 || numberOfShares > 1000) {
-        reply.done(<BotMessage>Invalid amount</BotMessage>);
-        aiState.done([
-          ...aiState.get(),
-          {
-            role: "function",
-            name: "show_stock_purchase_ui",
-            content: `[Invalid amount]`,
-          },
-        ]);
-        return;
+  (async () => {
+    let finalRes = "";
+    for await (const chunk of stream) {
+      const result = chunk.choices[0]?.delta.content;
+      if (result) {
+        finalRes += result;
       }
-
-      reply.done(
-        <>
-          <BotMessage>
-            Sure!{" "}
-            {typeof numberOfShares === "number"
-              ? `Click the button below to purchase ${numberOfShares} shares of $${symbol}:`
-              : `How many $${symbol} would you like to purchase?`}
-          </BotMessage>
-          <BotCard showAvatar={false}>
-            <Purchase
-              defaultAmount={numberOfShares}
-              name={symbol}
-              price={+price}
-            />
+      if (checkValid(finalRes)) {
+        reply.update(
+          <BotCard>
+            <div
+              dangerouslySetInnerHTML={{
+                __html: finalRes.replace(/\`\`\`(html|jsx)?/g, ""),
+              }}
+            ></div>
           </BotCard>
-        </>
-      );
-      aiState.done([
-        ...aiState.get(),
-        {
-          role: "function",
-          name: "show_stock_purchase_ui",
-          content: `[UI for purchasing ${numberOfShares} shares of ${symbol}. Current price = ${price}, total cost = ${
-            numberOfShares * price
-          }]`,
-        },
-      ]);
+        );
+      }
     }
-  );
+    reply.done();
+  })();
 
   return {
     id: Date.now(),
@@ -361,7 +119,6 @@ const initialUIState: {
 export const AI = createAI({
   actions: {
     submitUserMessage,
-    confirmPurchase,
   },
   initialUIState,
   initialAIState,
